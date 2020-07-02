@@ -3,7 +3,10 @@ import json
 import datetime
 import boto3
 
-region = os.environ['AWS_REGION']
+region      = os.environ['AWS_REGION']
+method = os.environ['instance_method']
+bucket_name = os.environ['bucket_name']
+bucket_key  = os.environ['bucket_key']
 
 def get_calendar(s3obj,bucket_name,bucket_key):
     s3 = s3obj.get_object(Bucket=bucket_name, Key=bucket_key)
@@ -28,14 +31,6 @@ def lambda_handler(event,context):
     resource = boto3.resource('ec2')
     client   = boto3.client('ec2')
     s3obj    = boto3.client('s3')
-    method  = 'none'
-
-    if 'method' in event:
-        method = event['method']
-    if 'bucket_name' in event:
-        bucket_name = event['bucket_name']
-    if 'bucket_key' in event:
-        bucket_key = event['bucket_key']
 
     instances = get_ec2instances(resource)
 
@@ -51,16 +46,17 @@ def lambda_handler(event,context):
         "Instances"	: [(i.id) for i in instances]
       }
     else:
+      ret = ''
       if list(instances):
         if method == 'stop':
-          response = stop_instances(instances)
+          ret = stop_instances(instances)
         if method == 'start':
-          response = start_instances(instances)
+          ret = start_instances(instances)
   
       response = {
   	"Region"   	: region,
   	"Method"   	: method,
-  	"Response"   	: response,
+  	"Response"   	: ret,
         "Instances"	: [(i.id) for i in instances]
       }
     return response
