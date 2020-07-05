@@ -1,0 +1,51 @@
+import os
+import json
+import datetime
+import boto3
+import urllib.request
+import logging
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+region = os.environ['AWS_REGION']
+webhook_url = os.environ['webhook_url']
+headers = {"Content-Type" : "application/json"}
+
+def get_ce(client,startdate,enddate):
+    return client.get_cost_and_usage(
+      TimePeriod = {'Start': startdate, 'End': enddate}, 
+      Granularity = 'MONTHLY',
+      Metrics = ['UnblendedCost'],
+      GroupBy = [{ 'Type': 'DIMENSION', 'Key': 'SERVICE' }]
+    )
+
+def write_teams(text):
+    json_data = json.dumps(text).encode("utf-8")
+    request = urllib.request.Request(webhook_url, data=json_data, method="post", headers=headers)
+    with urllib.request.urlopen(request) as response:
+        response_body = response.read().decode("utf-8")
+
+def lambda_handler(event,context):
+    client = boto3.client('ce')
+    now = datetime.datetime.now()
+    startdate = now.strftime('%Y-%m-01')
+    enddate   = now.strftime('%Y-%m-%d')
+    cost = ''
+
+    costinfo = get_ce(client,startdate,enddate)
+    logger.info(costinfo)
+    totalcost = 0.0
+    for val in costinfo['ResultsByTime'][0]['Groups']:
+        cost = cost + '- {}: {} USD\n\n'.format(val['Keys'][0],val['Metrics']['UnblendedCost']['Amount'])
+        totalcost = totalcost + float(val['Metrics']['UnblendedCost']['Amount'])
+    title = 'コスト状況報告({}~{}): Total= {} USD'.format(startdate,enddate,totalcost)
+    text = {"title": title, "text": cost}
+    write_teams(text)
+    
+    retdata = {
+  	    "startdate"   	: startdate,
+  	    "enddate"   	: enddate,
+        "cost"          : cost
+    }
+    return retdata
+

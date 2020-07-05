@@ -1,0 +1,74 @@
+import os
+import json
+import datetime
+import boto3
+import urllib.request
+import logging
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+region = os.environ['AWS_REGION']
+bucket_name = os.environ['bucket_name']
+bucket_key = os.environ['bucket_key']
+webhook_url = os.environ['webhook_url']
+headers = {"Content-Type" : "application/json"}
+
+def write_teams(text):
+    json_data = json.dumps(text).encode("utf-8")
+    request = urllib.request.Request(webhook_url, data=json_data, method="post", headers=headers)
+    with urllib.request.urlopen(request) as response:
+        response_body = response.read().decode("utf-8")
+
+def get_calendar(s3obj,bucket_name,bucket_key):
+    s3 = s3obj.get_object(Bucket=bucket_name, Key=bucket_key)
+    return s3['Body'].read().splitlines()
+
+def get_ec2instances(resource):
+    return resource.instances.filter(
+      Filters=[{
+        'Name': 'tag:BackupTarget',
+        'Values': ['ON']
+      }]
+    )
+
+def stop_instances(instances):
+    return instances.stop()
+
+def start_instances(instances):
+    return instances.start()
+
+def lambda_handler(event,context):
+    method = event['instance_method']
+    response_value = '処理なし'
+    method_text = '不明'
+    resource = boto3.resource('ec2')
+    s3obj    = boto3.client('s3')
+
+    check_dates = get_calendar(s3obj,bucket_name,bucket_key)
+    check_dates = [x.decode('utf8') for x in check_dates]
+    now_date    = datetime.datetime.now().strftime('%Y%m%d')
+    instances = get_ec2instances(resource)
+
+    if now_date in check_dates:
+      kind_text = '制御対象外日'
+    else:
+      kind_text = '制御対象日'
+      response_value = '処理失敗'
+      if list(instances):
+        if method == 'stop':
+          method_text = '停止'
+          response_value = stop_instances(instances)
+        if method == 'start':
+          method_text = '開始'
+          response_value = start_instances(instances)
+    text = '## インスタンス{}処理:{}({})\n\n'.format(method_text,kind_text,region)
+    text = text + '- EC2: {}\n\n- デバッグ情報: {}\n\n'.format(",".join([(i.id) for i in instances]),response_value)
+    write_teams({"text": text})
+    retdata = {
+  	    "Region"   	: region,
+  	    "Method"   	: method,
+  	    "Response"  : response_value,
+        "Instances"	: [(i.id) for i in instances]
+    }
+    logger.info(retdata)
+    return retdata

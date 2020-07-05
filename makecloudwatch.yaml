@@ -1,0 +1,18 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Parameters:
+  LambdaArn:
+    Type: String
+    Default: arn:aws:lambda:ap-northeast-1:723520853800:function:aws_instance_manage_lambda
+
+Resources:
+  Rule:
+    Type: 'AWS::Events::Rule'
+    Properties:
+      Name: test-rule
+      ScheduleExpression: 'cron(20 8 * * ? *)'
+      State: ENABLED
+      Targets:
+        - Arn: !Sub '${LambdaArn}'
+          Id: test-lambda-723520853800
+          Input: '{"instance_method": "stop"}'
