@@ -4,6 +4,8 @@ import datetime
 import boto3
 import urllib.request
 import logging
+import math
+from datetime import timedelta
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -11,12 +13,12 @@ region = os.environ['AWS_REGION']
 webhook_url = os.environ['webhook_url']
 headers = {"Content-Type" : "application/json"}
 
-def get_ce(client,startdate,enddate):
+def get_ce(client,startdate,enddate,key):
     return client.get_cost_and_usage(
       TimePeriod = {'Start': startdate, 'End': enddate}, 
       Granularity = 'MONTHLY',
-      Metrics = ['UnblendedCost'],
-      GroupBy = [{ 'Type': 'DIMENSION', 'Key': 'SERVICE' }]
+      Metrics = ['BlendedCost','UsageQuantity'],
+      GroupBy = [{ 'Type': 'DIMENSION', 'Key': key }]
     )
 
 def write_teams(text):
@@ -28,16 +30,27 @@ def write_teams(text):
 def lambda_handler(event,context):
     client = boto3.client('ce')
     now = datetime.datetime.now()
+    tomorrow = now + timedelta(days=1)
     startdate = now.strftime('%Y-%m-01')
-    enddate   = now.strftime('%Y-%m-%d')
+    enddate   = tomorrow.strftime('%Y-%m-%d')
     cost = ''
 
-    costinfo = get_ce(client,startdate,enddate)
+    costinfo = get_ce(client,startdate,enddate,'SERVICE')
     logger.info(costinfo)
-    totalcost = 0.0
+    totalcost = 0
     for val in costinfo['ResultsByTime'][0]['Groups']:
-        cost = cost + '- {}: {} USD\n\n'.format(val['Keys'][0],val['Metrics']['UnblendedCost']['Amount'])
-        totalcost = totalcost + float(val['Metrics']['UnblendedCost']['Amount'])
+        amount = val['Metrics']['BlendedCost']['Amount']
+        cost = cost + '- {}: {} USD\n\n'.format(val['Keys'][0],amount)
+        totalcost = totalcost + float(amount)
+    if totalcost == 0:
+        cost = "none"
+    else:
+        cost = cost + 'Region: \n\n'
+        costinfo = get_ce(client,startdate,enddate,'REGION')
+        for val in costinfo['ResultsByTime'][0]['Groups']:
+            amount = val['Metrics']['BlendedCost']['Amount']
+            if not math.isclose(float(amount), 0.0):
+                cost = cost + '- {}: {} USD\n\n'.format(val['Keys'][0],amount)
     title = 'コスト状況報告({}~{}): Total= {} USD'.format(startdate,enddate,totalcost)
     text = {"title": title, "text": cost}
     write_teams(text)
@@ -48,4 +61,3 @@ def lambda_handler(event,context):
         "cost"          : cost
     }
     return retdata
-
